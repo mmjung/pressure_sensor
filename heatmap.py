@@ -12,7 +12,6 @@
     for additional help.
 '''
 
-
 import argparse
 import datetime
 import functools
@@ -21,7 +20,6 @@ import os, os.path
 import sys
 import time
 import threading
-import Queue
 
 import numpy
 import serial
@@ -37,22 +35,38 @@ import matplotlib.pylab as plt
 import matrix
 
 
-def update_mesh (num, mesh, queue, transform):
-    try:
-        data = queue.get(timeout=0.0001)
-        mesh.set_array(transform(data))
+heatmap_data = numpy.ones(64)
 
-    except Queue.Empty:
-        pass
+
+def update_mesh (num, mesh, transform):
+    global heatmap_data
+
+    mesh.set_array(transform(heatmap_data))
+    update_mesh._samples.append(datetime.datetime.now())
+
+    if len(update_mesh._samples) >= 60:
+        deltas = [(update_mesh._samples[i] - update_mesh._samples[i - 1]).total_seconds()
+                  for i in range(1, len(update_mesh._samples))]
+
+        if all(d > 0 for d in deltas):
+            fps = [1.0 / d for d in deltas]
+            print("Mesh: %.2ffps" % (sum(fps) / len(fps)))
+
+        update_mesh._samples = []
 
     return mesh,
+
+
+update_mesh._samples = []
 
 
 def write_log (fp, fmt, data):
     fp.write(fmt.format(datetime.datetime.now().isoformat(), *data))
 
 
-def update_data (read_frame, queue, event, log):
+def update_data (read_frame, event, log):
+    global heatmap_data
+
     while event.is_set():
         data = numpy.zeros(64)
 
@@ -63,28 +77,32 @@ def update_data (read_frame, queue, event, log):
         if log:
             log.write(data)
 
-        with queue.mutex:
-            queue.queue.clear()
+        heatmap_data = data
 
-        queue.put(data)
+        update_data._samples.append(datetime.datetime.now())
+        if len(update_data._samples) >= 60:
+            deltas = [(update_data._samples[i] - update_data._samples[i - 1]).total_seconds()
+                          for i in range(1, len(update_data._samples))]
 
-        # Sleep for 1ms to allow the consumer to consume the
-        # item from the queue.
-        time.sleep(1 / 1000.0)
+            if all(d > 0 for d in deltas):
+                fps = [1.0 / d for d in deltas]
+                print("Read: %.2ffps" % (sum(fps) / len(fps)))
+
+            update_data._samples = []
+
+update_data._samples = []
 
 
 def main ():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-s', '--serial', default= 3,#None,
+    parser.add_argument('-s', '--serial',
         help='Device file of the serial port to use.')
     parser.add_argument('-R', '--baud-rate', default=38400, type=int,
         help='Baud rate to use on the serial port.')
 
     parser.add_argument('-F', '--faux-sensor', default=False,
         action='store_true', help='Use faux sensor data (testing).')
-    parser.add_argument('-T', '--test-sensor', default=False, 
-       action='store_true', help='Sensor data ranging from 0 to 63 to verify the correct order.')
 
     parser.add_argument('-b', '--log-base', default=None,
         type=int, help='Use base LOG_BASE logarithm as transformation')
@@ -97,12 +115,12 @@ def main ():
 
     args = parser.parse_args()
 
-    if not (args.serial or args.faux_sensor or args.test_sensor):
-        print 'Either run in faux sensor mode (-F), test mode (-T), or supply a serial port'
+    if not (args.serial or args.faux_sensor):
+        print 'Either run in faux sensor mode (-F) or supply a serial port'
         sys.exit(-1)
 
-    if args.serial and args.faux_sensor or args.serial and args.test_sensor or args.test_sensor and args.faux_sensor:
-        print 'Supply either -F, -T or -s options.'
+    if args.serial and args.faux_sensor:
+        print 'Supply either -F or -s options.'
         sys.exit(-2)
 
     if args.log_base:
@@ -118,15 +136,11 @@ def main ():
             serial_port_fp = args.serial
 
         fp = serial.Serial(serial_port_fp, args.baud_rate)
-    if args.test_sensor:
-        fp = matrix.TestSensor()
-        
-    if args.faux_sensor:
+
+    else:
         fp = matrix.FauxSensor()
 
-
     zeros = numpy.zeros((8, 8))
-    queue = Queue.Queue(maxsize=1)
     event = threading.Event()
     event.set()
 
@@ -142,14 +156,14 @@ def main ():
 
     read_frame = functools.partial(matrix.read_frame, fp)
     thread = threading.Thread(target=update_data,
-        args=(read_frame, queue, event, log))
+        args=(read_frame, event, log))
 
     thread.daemon = True
     thread.start()
 
     mesh_anim = matplotlib.animation.FuncAnimation(fig,
         update_mesh, int(args.fps),
-        fargs=(mesh, queue, numpy.vectorize(transform)),
+        fargs=(mesh, numpy.vectorize(transform)),
         interval=(1000.0/args.fps), blit=True)
 
     plt.show()

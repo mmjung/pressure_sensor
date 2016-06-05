@@ -25,7 +25,7 @@
 int sig = 7;
 
 int row_s0 = 12;
-int row_s1 = 11;C
+int row_s1 = 11;
 int row_s2 = 10;
 
 int column_s0 = 16;
@@ -40,12 +40,12 @@ int col_mapping[] =  { 5, 0, 4, 2, 1, 3, 6, 7 };
 void setup() {
     Serial.begin(38400);
     pinMode(sig, INPUT);
-    
+
     pinMode(row_s0, OUTPUT);
     pinMode(row_s1, OUTPUT);
     pinMode(row_s2, OUTPUT);
 
-// one of the column pins is not used but needs to be controlled
+    // one of the column pins is not used but needs to be controlled
     pinMode(column_s0, OUTPUT);
     pinMode(column_s1, OUTPUT);
     pinMode(column_s2, OUTPUT);
@@ -61,8 +61,9 @@ void setup() {
     digitalWrite (column_s3, LOW);
 
     digitalWrite (sig, LOW);
-    
+
     Serial.flush();
+    delay(1000);
 }
 
 
@@ -85,11 +86,13 @@ void loop() {
     unsigned char row = 0;
     unsigned char column = 0;
 
+    delayMicroseconds(500);
+
     for (row = 0; row < 8; row++){
         select_row(row);
 
         for (column = 0; column < 8; column++) {
-	        select_column(column + 8); // skip first 8 channels
+            select_column(column + 8); // skip first 8 channels
             delayMicroseconds(500);
 
             val = analogRead(sig);
@@ -101,5 +104,7 @@ void loop() {
             Serial.write(frame, 3);
         }
     }
+
+    Serial.flush();
 }
 
