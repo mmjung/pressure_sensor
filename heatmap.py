@@ -13,6 +13,7 @@
 '''
 
 import argparse
+import collections
 import datetime
 import functools
 import math
@@ -36,28 +37,17 @@ import matrix
 
 
 heatmap_data = numpy.ones(64)
+noise_history = collections.deque([numpy.zeros(64)], maxlen=300)
+noise_average = numpy.zeros(64)
+signal_history = collections.deque([numpy.zeros(64)], maxlen=5)
 
 
 def update_mesh (num, mesh, transform):
     global heatmap_data
 
     mesh.set_array(transform(heatmap_data))
-    update_mesh._samples.append(datetime.datetime.now())
-
-    if len(update_mesh._samples) >= 60:
-        deltas = [(update_mesh._samples[i] - update_mesh._samples[i - 1]).total_seconds()
-                  for i in range(1, len(update_mesh._samples))]
-
-        if all(d > 0 for d in deltas):
-            fps = [1.0 / d for d in deltas]
-            print("Mesh: %.2ffps" % (sum(fps) / len(fps)))
-
-        update_mesh._samples = []
 
     return mesh,
-
-
-update_mesh._samples = []
 
 
 def write_log (fp, fmt, data):
@@ -65,7 +55,7 @@ def write_log (fp, fmt, data):
 
 
 def update_data (read_frame, event, log):
-    global heatmap_data
+    global heatmap_data, noise_average, noise_history, signal_history
 
     while event.is_set():
         data = numpy.zeros(64)
@@ -77,20 +67,12 @@ def update_data (read_frame, event, log):
         if log:
             log.write(data)
 
-        heatmap_data = data
+        if not any(x > 250 for x in data):
+            noise_history.append(data)
+            noise_average = numpy.array([sum(c) / float(len(c)) for c in zip(*noise_history)])
 
-        update_data._samples.append(datetime.datetime.now())
-        if len(update_data._samples) >= 60:
-            deltas = [(update_data._samples[i] - update_data._samples[i - 1]).total_seconds()
-                          for i in range(1, len(update_data._samples))]
-
-            if all(d > 0 for d in deltas):
-                fps = [1.0 / d for d in deltas]
-                print("Read: %.2ffps" % (sum(fps) / len(fps)))
-
-            update_data._samples = []
-
-update_data._samples = []
+        signal_history.append(data - noise_average)
+        heatmap_data = numpy.array([sum(c) / float(len(c)) for c in zip(*signal_history)])
 
 
 def main ():
@@ -151,7 +133,7 @@ def main ():
         log = None
 
     fig = plt.figure()
-    mesh = plt.pcolor(zeros, vmin=transform(0), vmax=transform(600))
+    mesh = plt.pcolor(zeros, vmin=transform(0), vmax=transform(300))
     plt.colorbar()
 
     read_frame = functools.partial(matrix.read_frame, fp)
